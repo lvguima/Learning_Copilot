@@ -96,3 +96,17 @@ class QuizGenerateRequest(BaseModel):
 class QuizEvaluateRequest(BaseModel):
     trace_id: str
     answers: List[str]
+
+
+class RuntimeLLMConfig(BaseModel):
+    provider: Literal["echo", "openai_compat"] = "echo"
+    endpoint: str = "https://api.openai.com/v1"
+    model: str = "gpt-4o-mini"
+    api_key_env: str = "OPENAI_API_KEY"
+    timeout_seconds: int = 30
+    max_context_tokens: int = 12000
+
+
+class UpdateConfigRequest(BaseModel):
+    workspace_root_dir: Optional[str] = None
+    llm: Optional[RuntimeLLMConfig] = None

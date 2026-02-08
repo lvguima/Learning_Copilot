@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List, Literal, Optional, Union
+from typing import Any, List, Literal, Optional, Union
 
 import yaml
 from pydantic import BaseModel, Field
@@ -54,6 +54,12 @@ class AppConfig(BaseModel):
     ui: UIConfig = Field(default_factory=UIConfig)
 
 
+def _model_to_dict(model: BaseModel) -> dict[str, Any]:
+    if hasattr(model, "model_dump"):
+        return model.model_dump(mode="json")
+    return model.dict()
+
+
 def load_config(config_path: Optional[Union[str, Path]] = None) -> AppConfig:
     if config_path is None:
         return AppConfig()
@@ -61,4 +67,17 @@ def load_config(config_path: Optional[Union[str, Path]] = None) -> AppConfig:
     if not path.exists():
         return AppConfig()
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    if hasattr(AppConfig, "model_validate"):
+        return AppConfig.model_validate(raw)
     return AppConfig.parse_obj(raw)
+
+
+def save_config(config: AppConfig, config_path: Union[str, Path]) -> Path:
+    path = Path(config_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = _model_to_dict(config)
+    path.write_text(
+        yaml.safe_dump(data, sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+    return path

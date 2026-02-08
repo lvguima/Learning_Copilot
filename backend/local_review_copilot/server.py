@@ -222,14 +222,9 @@ def quiz_evaluate(request: QuizEvaluateRequest) -> dict[str, Any]:
             for index, item in enumerate(scored)
         ]
     )
-    exports = storage.save_export("quiz", markdown, payload)
-    return {"trace_id": request.trace_id, "items": payload["items"], "exports": exports}
-    markdown = "# Quiz Result\n\n" + "\n\n".join(
-        [f"## Q{index + 1}\n- 题目：{item.question}\n- 得分：{item.score}\n- 点评：{item.feedback}" for index, item in enumerate(scored)]
-    )
     markdown = "# Quiz Result\n\n" + "\n\n".join(
         [
-            f"## Q{index + 1}\n- 题目：{item.question}\n- 得分：{item.score}\n- 点评：{item.feedback}"
+            f"## Q{index + 1}\n- Question: {item.question}\n- Score: {item.score}\n- Feedback: {item.feedback}"
             for index, item in enumerate(scored)
         ]
     )
@@ -243,7 +238,3 @@ def session(trace_id: str) -> dict[str, Any]:
         return storage.load_session(trace_id)
     except FileNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
-
-
-# Backward-compatible export: keep `local_review_copilot.app:app` usable.
-from .server import app as app

@@ -1,7 +1,4 @@
-<<<<<<< HEAD
-# Learning_Copilot
-=======
-# Local Review Copilot (v0.1)
+# Local Review Copilot (v0.1.1)
 
 Lightweight desktop-first local review assistant using:
 - `Tauri` desktop shell
@@ -21,7 +18,7 @@ cd backend
 python -m venv .venv
 . .venv/Scripts/activate
 pip install -e .[dev]
-uvicorn local_review_copilot.app:app --reload --port 8008
+uvicorn local_review_copilot.server:app --reload --port 8008
 ```
 
 ## Frontend quick start
@@ -35,24 +32,36 @@ npm run dev
 ## Desktop quick start
 
 ```bash
-cd backend
-uvicorn local_review_copilot.app:app --reload --port 8008
-
-# new terminal
 cd src-tauri
 cargo tauri dev
 ```
 
+Notes:
+- Desktop now auto-starts backend sidecar in dev mode.
+- If auto-start fails, run backend manually with:
+  - `cd backend`
+  - `uvicorn local_review_copilot.server:app --reload --port 8008`
+
 ## Config
 
-Create `backend/config.yaml` (optional). Defaults are built-in.
-Sensitive keys are read from environment variables via `llm.api_key_env`.
+- Runtime config API:
+  - `GET /config`
+  - `POST /config`
+- Config persists to `backend/config.yaml`.
+- Sensitive keys are still read from env variable names (e.g. `OPENAI_API_KEY`).
 
 ## Current v0.1 scope
 
 - Scan a workspace recursively with ignore rules
 - Parse `md/txt/pdf(text-layer)/image metadata`
 - Run `Chat / Review / Quiz`
-- Save session and reports to local `output` directory
+- Save session and reports to local `outputs` directory
 - Modern lightweight desktop UI (`Scan`, `Review`, `Quiz/Chat`)
->>>>>>> 3ea5f4d (Initial commit: environment setup and project structure)
+- Directory picker + selectable file injection + model config panel
+
+## Iteration docs
+
+- `docs/2026-02-08-dev-log.md`
+- `docs/2026-02-09-plan.md`
+- `docs/handoff-checklist.md`
+- `docs/next-iteration-v0.1.1.md`

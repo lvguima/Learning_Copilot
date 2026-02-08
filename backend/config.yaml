@@ -1,0 +1,26 @@
+workspace:
+  root_dir: .
+  ignore_patterns:
+  - .git/*
+  - node_modules/*
+  - __pycache__/*
+  - '*.tmp'
+  - '*.log'
+  max_file_size_mb: 10
+  max_files_per_run: 500
+parsing:
+  pdf_mode: text_only
+  image_mode: skip
+llm:
+  provider: echo
+  endpoint: https://api.openai.com/v1
+  model: gpt-4o-mini
+  api_key_env: OPENAI_API_KEY
+  timeout_seconds: 30
+  max_context_tokens: 12000
+output:
+  storage_dir: outputs
+  export_markdown: true
+  export_json: true
+ui:
+  mode: desktop
