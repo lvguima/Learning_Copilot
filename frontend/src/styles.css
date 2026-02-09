@@ -125,6 +125,19 @@ button {
   background: #fff1f2;
 }
 
+.card.warning {
+  border-color: #fde68a;
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.warning-list {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+}
+
 .quiz-item {
   border: 1px dashed #cbd5e1;
   border-radius: 10px;
@@ -143,10 +156,23 @@ button {
 
 .doc-item {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   font-size: 12px;
   color: #334155;
+}
+
+.doc-main {
+  display: grid;
+  gap: 2px;
+}
+
+.doc-path {
+  word-break: break-all;
+}
+
+.doc-extra {
+  color: #64748b;
 }
 
 .settings-grid {

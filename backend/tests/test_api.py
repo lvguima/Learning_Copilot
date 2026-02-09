@@ -12,16 +12,16 @@ def test_health() -> None:
     assert response.json()["status"] == "ok"
 
 
-def test_runtime_config_round_trip(tmp_path, monkeypatch) -> None:
-    config_path = tmp_path / "config.yaml"
-    monkeypatch.setattr(server, "CONFIG_PATH", str(config_path))
+def test_runtime_config_round_trip(local_tmp_dir, monkeypatch) -> None:
+    config_path = local_tmp_dir / "config.yaml"
+    monkeypatch.setattr(server, "CONFIG_PATH", config_path)
 
     client = TestClient(app)
     current = client.get("/config")
     assert current.status_code == 200
 
     update_payload = {
-        "workspace_root_dir": str(tmp_path),
+        "workspace_root_dir": str(local_tmp_dir),
         "llm": {
             "provider": "echo",
             "endpoint": "https://api.openai.com/v1",
@@ -35,6 +35,18 @@ def test_runtime_config_round_trip(tmp_path, monkeypatch) -> None:
     assert updated.status_code == 200
     assert config_path.exists()
     body = updated.json()
-    assert body["workspace_root_dir"] == str(tmp_path)
+    assert body["workspace_root_dir"] == str(local_tmp_dir.resolve())
     assert body["llm"]["max_context_tokens"] == 8000
+
+
+def test_runtime_config_rejects_missing_workspace(monkeypatch, local_tmp_dir) -> None:
+    config_path = local_tmp_dir / "config.yaml"
+    monkeypatch.setattr(server, "CONFIG_PATH", config_path)
+    missing = local_tmp_dir / "missing-dir"
+
+    client = TestClient(app)
+    response = client.post("/config", json={"workspace_root_dir": str(missing)})
+
+    assert response.status_code == 400
+    assert "Workspace root not found" in response.json()["detail"]
 
