@@ -8,13 +8,10 @@ workspace:
   - '*.log'
   max_file_size_mb: 10
   max_files_per_run: 500
-parsing:
-  pdf_mode: text_only
-  image_mode: skip
 llm:
   provider: openai_compat
   endpoint: https://api.siliconflow.cn/v1
-  model: deepseek-ai/DeepSeek-V3.2
+  model: Pro/moonshotai/Kimi-K2.5
   api_key_env: SILICONFLOW_API_KEY
   timeout_seconds: 30
   max_context_tokens: 12000

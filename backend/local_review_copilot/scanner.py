@@ -17,6 +17,10 @@ SUPPORTED_TYPES = {
     ".jpg": "image",
     ".jpeg": "image",
     ".webp": "image",
+    ".gif": "image",
+    ".bmp": "image",
+    ".tif": "image",
+    ".tiff": "image",
 }
 
 

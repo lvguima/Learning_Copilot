@@ -29,7 +29,7 @@ def load_pdf_document(meta: DocumentMeta) -> DocumentContent:
                 file_type=meta.file_type,
                 parse_status="degraded",
                 warnings=[
-                    "No text layer extracted. PDF might be scanned; use image/vision route."
+                    "No text layer extracted. PDF might be scanned."
                 ],
                 text="",
             )

@@ -50,3 +50,13 @@ def test_runtime_config_rejects_missing_workspace(monkeypatch, local_tmp_dir) ->
     assert response.status_code == 400
     assert "Workspace root not found" in response.json()["detail"]
 
+
+def test_runtime_config_rejects_invalid_llm_provider(monkeypatch, local_tmp_dir) -> None:
+    config_path = local_tmp_dir / "config.yaml"
+    monkeypatch.setattr(server, "CONFIG_PATH", config_path)
+
+    client = TestClient(app)
+    response = client.post("/config", json={"llm": {"provider": "unsupported"}})
+
+    assert response.status_code == 422
+

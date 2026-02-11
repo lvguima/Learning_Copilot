@@ -22,11 +22,6 @@ class WorkspaceConfig(BaseModel):
     max_files_per_run: int = 500
 
 
-class ParsingConfig(BaseModel):
-    pdf_mode: Literal["text_only", "hybrid"] = "text_only"
-    image_mode: Literal["send_to_vision", "skip"] = "skip"
-
-
 class LLMConfig(BaseModel):
     provider: Literal["echo", "openai_compat"] = "echo"
     endpoint: str = "https://api.openai.com/v1"
@@ -48,7 +43,6 @@ class UIConfig(BaseModel):
 
 class AppConfig(BaseModel):
     workspace: WorkspaceConfig = Field(default_factory=WorkspaceConfig)
-    parsing: ParsingConfig = Field(default_factory=ParsingConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)
     ui: UIConfig = Field(default_factory=UIConfig)

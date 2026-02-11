@@ -11,7 +11,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from .config import LLMConfig, load_config, save_config
 from .context_builder import build_context_chunks
 from .llm.client import LLMClient
-from .loaders import load_documents
+from .loaders.pdf import load_pdf_document
+from .loaders.text import load_text_document
 from .logging import setup_logging
 from .modes.chat import build_chat_messages, make_chat_turn
 from .modes.quiz import build_quiz_messages, evaluate_quiz_items, fallback_quiz
@@ -26,6 +27,7 @@ from .models import (
     SessionRecord,
     UpdateConfigRequest,
 )
+from .multimodal import build_multimodal_parts
 from .scanner import scan_workspace
 from .storage import Storage
 
@@ -84,45 +86,84 @@ def _dedupe_messages(messages: list[str]) -> list[str]:
     return unique
 
 
-def _build_context_warnings(contents: list[Any], selected_paths: list[str], chunk_count: int) -> list[str]:
-    selected_set = set(selected_paths)
-    targeted_count = 0
+def _resolve_selected_docs(docs: list[Any], selected_paths: list[str]) -> tuple[list[Any], list[str]]:
+    if not selected_paths:
+        return docs, []
+
+    docs_by_path = {doc.path: doc for doc in docs}
+    selected_docs: list[Any] = []
+    missing: list[str] = []
+    for path in selected_paths:
+        doc = docs_by_path.get(path)
+        if doc is None:
+            missing.append(path)
+            continue
+        selected_docs.append(doc)
+    return selected_docs, missing
+
+
+def _build_text_context(selected_docs: list[Any]) -> tuple[list[Any], list[str]]:
     warnings: list[str] = []
-
-    for content in contents:
-        if selected_set and content.path not in selected_set:
+    text_contents: list[Any] = []
+    for doc in selected_docs:
+        if doc.file_type not in {"md", "txt", "pdf"}:
             continue
-        targeted_count += 1
-        if content.parse_status == "ok":
-            continue
-        detail = "；".join(content.warnings) if content.warnings else "无额外说明"
-        if content.parse_status == "degraded":
-            warnings.append(f"降级解析：{content.path} -> {detail}")
-        elif content.parse_status == "image_only":
-            warnings.append(f"图片文件未提取正文：{content.path} -> {detail}")
-        else:
-            warnings.append(f"解析失败：{content.path} -> {detail}")
+        content = load_pdf_document(doc) if doc.file_type == "pdf" else load_text_document(doc)
+        if content.parse_status != "ok":
+            detail = "; ".join(content.warnings) if content.warnings else "no detail"
+            warnings.append(f"Text parse {content.parse_status}: {content.path} -> {detail}")
+        text_contents.append(content)
 
-    if selected_set and targeted_count == 0:
-        warnings.append("已勾选文件未出现在扫描结果中，请先重新扫描。")
-    if targeted_count > 0 and chunk_count == 0:
-        warnings.append("未提取到可用文本上下文，结果可能不完整。")
-
-    return _dedupe_messages(warnings)
-
-
-def _prepare_context(
-    root_dir: str | None, selected_paths: list[str]
-) -> tuple[list[Any], list[Any], list[str]]:
-    docs = _scan_documents(root_dir)
-    contents = load_documents(docs)
     chunks = build_context_chunks(
-        contents,
+        text_contents,
         max_chars=config.llm.max_context_tokens * 3,
-        selected_paths=selected_paths,
+        selected_paths=[doc.path for doc in selected_docs],
     )
-    warnings = _build_context_warnings(contents, selected_paths, len(chunks))
-    return docs, chunks, warnings
+    if text_contents and not chunks:
+        warnings.append("Selected text files produced no usable context chunks.")
+    return chunks, warnings
+
+
+def _prepare_prompt_assets(
+    root_dir: str | None,
+    selected_paths: list[str],
+) -> tuple[list[Any], list[Any], list[dict[str, Any]], list[str]]:
+    docs = _scan_documents(root_dir)
+    selected_docs, missing_paths = _resolve_selected_docs(docs, selected_paths)
+
+    warnings = [f"Selected file not found in scan results: {path}" for path in missing_paths]
+    chunks, text_warnings = _build_text_context(selected_docs)
+    multimodal_parts, multimodal_warnings = build_multimodal_parts(
+        docs,
+        selected_paths,
+        model=config.llm.model,
+    )
+
+    warnings.extend(text_warnings)
+    warnings.extend(multimodal_warnings)
+
+    if not chunks and not multimodal_parts:
+        warnings.append("No usable text context or multimodal attachments were prepared.")
+
+    return docs, chunks, multimodal_parts, _dedupe_messages(warnings)
+
+
+def _is_multimodal_not_supported_error(error: Exception) -> bool:
+    message = str(error).lower()
+    markers = [
+        "http 400",
+        "invalid_request_error",
+        "unsupported",
+        "image_url",
+        "audio_url",
+        "video_url",
+    ]
+    return any(item in message for item in markers)
+
+
+def _error_text(error: Exception) -> str:
+    text = str(error).strip()
+    return text if text else repr(error)
 
 
 @app.get("/health")
@@ -197,12 +238,23 @@ def scan(request: ScanRequest) -> dict[str, Any]:
 @app.post("/chat/session")
 async def chat(request: ChatRequest) -> dict[str, Any]:
     trace_id = _trace_id()
-    _, chunks, warnings = _prepare_context(request.root_dir, request.selected_paths)
-    messages = build_chat_messages(chunks, request.message)
+    _, chunks, multimodal_parts, warnings = _prepare_prompt_assets(request.root_dir, request.selected_paths)
+    messages = build_chat_messages(chunks, request.message, multimodal_parts)
     try:
         answer = await llm_client.generate(messages)
     except Exception as error:
-        raise HTTPException(status_code=502, detail=f"LLM call failed: {error}") from error
+        logger.warning("Chat LLM failed (first attempt): %s", _error_text(error))
+        if multimodal_parts and _is_multimodal_not_supported_error(error):
+            warnings.append(
+                "Current model may not support multimodal parts. Retried with text-only context."
+            )
+            try:
+                answer = await llm_client.generate(build_chat_messages(chunks, request.message, []))
+            except Exception as retry_error:
+                logger.warning("Chat LLM failed after text-only retry: %s", _error_text(retry_error))
+                raise HTTPException(status_code=502, detail=f"LLM call failed: {_error_text(retry_error)}") from retry_error
+        else:
+            raise HTTPException(status_code=502, detail=f"LLM call failed: {_error_text(error)}") from error
 
     assistant_turn = make_chat_turn(answer, chunks)
     session = SessionRecord(
@@ -227,21 +279,34 @@ async def chat(request: ChatRequest) -> dict[str, Any]:
 @app.post("/review/run")
 async def review(request: ReviewRequest) -> dict[str, Any]:
     trace_id = _trace_id()
-    _, chunks, warnings = _prepare_context(request.root_dir, request.selected_paths)
-    messages = build_review_messages(chunks, request.topic)
+    _, chunks, multimodal_parts, warnings = _prepare_prompt_assets(request.root_dir, request.selected_paths)
+    messages = build_review_messages(chunks, request.topic, multimodal_parts)
     llm_text = ""
     try:
         llm_text = await llm_client.generate(messages)
     except Exception as error:
-        logger.warning("Review LLM failed: %s", error)
+        if multimodal_parts and _is_multimodal_not_supported_error(error):
+            warnings.append(
+                "Current model may not support multimodal parts. Retried with text-only context."
+            )
+            try:
+                llm_text = await llm_client.generate(build_review_messages(chunks, request.topic, []))
+            except Exception as retry_error:
+                logger.warning("Review LLM failed after text-only retry: %s", _error_text(retry_error))
+                warnings.append(f"Review model call failed after retry: {_error_text(retry_error)}")
+        else:
+            logger.warning("Review LLM failed: %s", _error_text(error))
+            warnings.append(f"Review model call failed: {_error_text(error)}")
+    if not llm_text.strip():
+        warnings.append("Review model output is empty. Used fallback template.")
     report = fallback_review(trace_id, chunks, llm_text)
 
     markdown = (
-        f"# 复盘报告\n\n"
+        f"# Review Report\n\n"
         f"Trace ID: `{trace_id}`\n\n"
-        f"## 总结\n{report.summary}\n\n"
-        f"## 问题\n" + "\n".join([f"- {item}" for item in report.questions]) + "\n\n"
-        f"## 行动\n" + "\n".join([f"- {item}" for item in report.actions]) + "\n"
+        f"## Summary\n{report.summary}\n\n"
+        f"## Questions\n" + "\n".join([f"- {item}" for item in report.questions]) + "\n\n"
+        f"## Actions\n" + "\n".join([f"- {item}" for item in report.actions]) + "\n"
     )
     exports = storage.save_export("review", markdown, _dump_model(report))
     session = SessionRecord(
@@ -263,12 +328,23 @@ async def review(request: ReviewRequest) -> dict[str, Any]:
 @app.post("/quiz/generate")
 async def quiz_generate(request: QuizGenerateRequest) -> dict[str, Any]:
     trace_id = _trace_id()
-    _, chunks, warnings = _prepare_context(request.root_dir, request.selected_paths)
-    messages = build_quiz_messages(chunks, request.count)
+    _, chunks, multimodal_parts, warnings = _prepare_prompt_assets(request.root_dir, request.selected_paths)
+    messages = build_quiz_messages(chunks, request.count, multimodal_parts)
     try:
         _ = await llm_client.generate(messages)
     except Exception as error:
-        logger.warning("Quiz LLM failed: %s", error)
+        if multimodal_parts and _is_multimodal_not_supported_error(error):
+            warnings.append(
+                "Current model may not support multimodal parts. Retried with text-only context."
+            )
+            try:
+                _ = await llm_client.generate(build_quiz_messages(chunks, request.count, []))
+            except Exception as retry_error:
+                logger.warning("Quiz LLM failed after text-only retry: %s", _error_text(retry_error))
+                warnings.append(f"Quiz model call failed after retry: {_error_text(retry_error)}")
+        else:
+            logger.warning("Quiz LLM failed: %s", _error_text(error))
+            warnings.append(f"Quiz model call failed: {_error_text(error)}")
     quiz_items = fallback_quiz(chunks, request.count)
     QUIZ_CACHE[trace_id] = [_dump_model(item) for item in quiz_items]
     session = SessionRecord(
@@ -296,9 +372,9 @@ def quiz_evaluate(request: QuizEvaluateRequest) -> dict[str, Any]:
     items = [_validate_model(QuizItem, item) for item in QUIZ_CACHE[request.trace_id]]
     scored = evaluate_quiz_items(items, request.answers)
     payload = {"trace_id": request.trace_id, "items": [_dump_model(item) for item in scored]}
-    markdown = "# 测验结果\n\n" + "\n\n".join(
+    markdown = "# Quiz Result\n\n" + "\n\n".join(
         [
-            f"## Q{index + 1}\n- 题目：{item.question}\n- 得分：{item.score}\n- 点评：{item.feedback}"
+            f"## Q{index + 1}\n- Question: {item.question}\n- Score: {item.score}\n- Feedback: {item.feedback}"
             for index, item in enumerate(scored)
         ]
     )

@@ -53,7 +53,9 @@ Notes:
 ## Current v0.1 scope
 
 - Scan a workspace recursively with ignore rules
-- Parse `md/txt/pdf(text-layer)/image metadata`
+- Build native multimodal requests (OpenAI-compatible content parts)
+- Attach selected images as `image_url` parts (`png/jpg/jpeg/webp/gif`)
+- For selected PDFs: use text-layer as context, and try extracting page images for vision
 - Run `Chat / Review / Quiz`
 - Save session and reports to local `outputs` directory
 - Modern lightweight desktop UI (`Scan`, `Review`, `Quiz/Chat`)
